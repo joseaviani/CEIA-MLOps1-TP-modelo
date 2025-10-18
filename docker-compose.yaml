@@ -52,6 +52,7 @@ x-airflow-common: &airflow-common
     - ${AIRFLOW_PROJ_DIR:-./airflow}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-./airflow}/plugins:/opt/airflow/plugins
     - ${AIRFLOW_PROJ_DIR:-./airflow}/secrets:/opt/secrets
+    - ./dataset:/opt/airflow/dataset
   networks:
     - frontend
     - backend
@@ -171,6 +172,7 @@ services:
       - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY:-minio}
       - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_ACCESS_KEY:-minio123}
       - MLFLOW_S3_ENDPOINT_URL=http://s3:9000
+      - MLFLOW_SERVER_DISABLE_SECURITY_MIDDLEWARE=true
     command: >
       mlflow server 
       --backend-store-uri postgresql://${PG_USER:-airflow}:${PG_PASSWORD:-airflow}@postgres:5432/mlflow_db
@@ -213,6 +215,29 @@ services:
       interval: 60s
       timeout: 10s
       start_period: 120s
+      retries: 3
+
+  frontend:
+    restart: always
+    image: nginx:alpine
+    container_name: stroke_frontend
+    profiles:
+      - all
+    depends_on:
+      fastapi:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    networks:
+      - frontend
+    volumes:
+      - ./frontend/index.html:/usr/share/nginx/html/index.html:ro
+      - ./frontend/styles.css:/usr/share/nginx/html/styles.css:ro
+      - ./frontend/script.js:/usr/share/nginx/html/script.js:ro
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost || exit 1
+      interval: 30s
+      timeout: 10s
       retries: 3
 
   airflow-apiserver:
@@ -369,14 +394,14 @@ services:
         echo
         echo "Creating missing opt dirs if missing:"
         echo
-        mkdir -v -p /opt/airflow/{logs,dags,plugins,config}
+        mkdir -v -p /opt/airflow/{logs,dags,dataset,plugins,config}
         echo
         echo "Airflow version:"
         /entrypoint airflow version
         echo
         echo "Files in shared volumes:"
         echo
-        ls -la /opt/airflow/{logs,dags,plugins,config}
+        ls -la /opt/airflow/{logs,dags,dataset,plugins,config}
         echo
         echo "Running airflow config list to create default config file if missing."
         echo
@@ -384,7 +409,7 @@ services:
         echo
         echo "Files in shared volumes:"
         echo
-        ls -la /opt/airflow/{logs,dags,plugins,config}
+        ls -la /opt/airflow/{logs,dags,dataset,plugins,config}
         echo
         echo "Change ownership of files in /opt/airflow to ${AIRFLOW_UID}:${AIRFLOW_GID:-0}"
         echo
@@ -392,11 +417,11 @@ services:
         echo
         echo "Change ownership of files in shared volumes to ${AIRFLOW_UID}:${AIRFLOW_GID:-0}"
         echo
-        chown -v -R "${AIRFLOW_UID}:${AIRFLOW_GID:-0}" /opt/airflow/{logs,dags,plugins,config}
+        chown -v -R "${AIRFLOW_UID}:${AIRFLOW_GID:-0}" /opt/airflow/{logs,dags,dataset,plugins,config}
         echo
         echo "Files in shared volumes:"
         echo
-        ls -la /opt/airflow/{logs,dags,plugins,config}
+        ls -la /opt/airflow/{logs,dags,dataset,plugins,config}
     # yamllint enable rule:line-length
     environment:
       <<: *airflow-common-env
